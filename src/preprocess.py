@@ -52,7 +52,7 @@ def normalize_dates(frame: pd.DataFrame, date_column: str = "date") -> pd.DataFr
     normalized = frame.copy()
 
     # Invalid dates become missing values instead of crashing the whole pipeline.
-    dates = pd.to_datetime(normalized[date_column], errors="coerce")
+    dates = normalized[date_column].map(lambda value: pd.to_datetime(value, errors="coerce"))
     normalized[date_column] = dates.dt.strftime("%Y-%m-%d")
     return normalized
 
