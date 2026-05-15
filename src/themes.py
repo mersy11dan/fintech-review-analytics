@@ -1,4 +1,4 @@
-"""Thematic analysis for bank app reviews using TF-IDF n-grams."""
+﻿"""Thematic analysis for bank app reviews using TF-IDF n-grams."""
 
 from __future__ import annotations
 
@@ -74,6 +74,15 @@ THEME_SEEDS = {
     },
 }
 
+DEFAULT_THEME_KEYWORDS = {
+    "onboarding": {"register", "login", "signup", "verification", "kyc"},
+    "transactions": {"transfer", "payment", "send", "receive", "transaction"},
+    "reliability": {"crash", "bug", "slow", "error", "failed", "freeze"},
+    "support": {"support", "help", "service", "agent", "response"},
+    "pricing": {"fee", "charge", "cost", "rate", "expensive"},
+    "usability": {"easy", "interface", "design", "navigation", "simple"},
+}
+
 
 @dataclass(frozen=True)
 class ThemeAnalysisConfig:
@@ -116,6 +125,23 @@ def normalize_text(text: object) -> str:
     return re.sub(r"\s+", " ", str(text).lower()).strip()
 
 
+def extract_themes(text: str, theme_keywords: dict[str, set[str]] | None = None) -> list[str]:
+    """Return matching lightweight business themes for one cleaned review."""
+    keywords = theme_keywords or DEFAULT_THEME_KEYWORDS
+    tokens = set((text or "").lower().split())
+    return [theme for theme, words in keywords.items() if tokens.intersection(words)]
+
+
+def add_theme_labels(frame: pd.DataFrame, text_column: str = "review") -> pd.DataFrame:
+    """Append lightweight keyword theme labels to a DataFrame."""
+    if text_column not in frame.columns:
+        raise ValueError(f"Missing required text column: {text_column}")
+
+    themed = frame.copy()
+    themed["themes"] = themed[text_column].map(extract_themes)
+    return themed
+
+
 def extract_tfidf_keywords(
     reviews: pd.Series,
     max_features: int = 40,
@@ -150,14 +176,11 @@ def group_keywords_into_themes(
 
     for keyword in keywords:
         for theme, seeds in THEME_SEEDS.items():
-            # A phrase belongs to a theme if it contains one of that theme's seed terms.
             if any(seed in keyword for seed in seeds):
                 grouped[theme].append(keyword)
                 break
 
     grouped = {theme: terms for theme, terms in grouped.items() if terms}
-
-    # Keep the most populated themes, capped to 3-5 categories per bank.
     ranked_themes = sorted(grouped.items(), key=lambda item: len(item[1]), reverse=True)
     selected = dict(ranked_themes[:max_themes])
 

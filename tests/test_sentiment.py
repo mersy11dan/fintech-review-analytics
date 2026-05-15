@@ -2,7 +2,12 @@
 
 import pandas as pd
 
-from src.sentiment import SentimentConfig, add_sentiment_columns, identify_theme, run_sentiment_pipeline
+from src.sentiment import (
+    SentimentConfig,
+    add_sentiment_columns,
+    identify_theme,
+    run_sentiment_pipeline,
+)
 
 
 class FakeClassifier:
@@ -12,6 +17,12 @@ class FakeClassifier:
         if "bad" in text:
             return "negative", 0.91
         return "positive", 0.87
+
+
+def test_sentiment_module_imports():
+    import src.sentiment
+
+    assert src.sentiment is not None
 
 
 def test_identify_theme_matches_known_keywords():
@@ -49,4 +60,3 @@ def test_run_sentiment_pipeline_reads_and_writes_csv(tmp_path):
     assert output_path.exists()
     assert scored.loc[0, "review_text"] == "easy app"
     assert scored.loc[0, "sentiment_label"] == "positive"
-

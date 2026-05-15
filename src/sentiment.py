@@ -123,6 +123,34 @@ def build_sentiment_classifier(config: SentimentConfig) -> SentimentClassifier:
         return TextBlobSentimentClassifier()
 
 
+def classify_compound_score(score: float) -> str:
+    """Convert a VADER compound score into a sentiment label."""
+    if score >= 0.05:
+        return "positive"
+    if score <= -0.05:
+        return "negative"
+    return "neutral"
+
+
+def score_sentiment(text: str) -> dict[str, float | str]:
+    """Score one review with VADER for lightweight pipeline compatibility."""
+    from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+
+    analyzer = SentimentIntensityAnalyzer()
+    scores = analyzer.polarity_scores(text or "")
+    return {**scores, "sentiment": classify_compound_score(scores["compound"])}
+
+
+def add_sentiment_scores(frame: pd.DataFrame, text_column: str = "review") -> pd.DataFrame:
+    """Append VADER scores and labels to a DataFrame."""
+    if text_column not in frame.columns:
+        raise ValueError(f"Missing required text column: {text_column}")
+
+    scored = frame.copy()
+    sentiment_frame = pd.DataFrame(scored[text_column].map(score_sentiment).to_list())
+    return scored.join(sentiment_frame)
+
+
 def get_review_column(frame: pd.DataFrame) -> str:
     """Find the review text column from cleaned or raw-like data."""
     for column in ("review", "review_text", "content"):
@@ -141,7 +169,6 @@ def add_sentiment_columns(
     output = frame.copy().reset_index(drop=True)
     review_text = output[text_column].fillna("").astype(str)
 
-    # Keep a stable 1-based ID for downstream joins and reports.
     output["review_id"] = range(1, len(output) + 1)
     output["review_text"] = review_text
 
@@ -172,4 +199,3 @@ def run_sentiment_pipeline(
     scored.to_csv(output_path, index=False)
     LOGGER.info("Saved sentiment output to %s", output_path)
     return scored
-
