@@ -1,9 +1,12 @@
 """Tests for report-ready review analysis helpers."""
 
 import pandas as pd
+import pytest
 
 from src.analysis import (
     AnalysisConfig,
+    build_bank_recommendation_summary,
+    load_analysis_dataset,
     load_processed_reviews,
     run_review_analysis,
     sentiment_by_rating,
@@ -26,6 +29,7 @@ def sample_reviews() -> pd.DataFrame:
                 "slow support",
             ],
             "sentiment_label": ["positive", "negative", "positive", "negative"],
+            "sentiment_score": [0.95, 0.9, 0.88, 0.84],
             "identified_theme": [
                 "transfer_speed",
                 "login_issues",
@@ -76,6 +80,8 @@ def test_run_review_analysis_writes_report_tables_and_plots(tmp_path):
     assert outputs["sentiment_by_bank"].exists()
     assert outputs["sentiment_by_rating"].exists()
     assert outputs["top_themes"].exists()
+    assert outputs["recommendation_summary"].exists()
+    assert outputs["recommendation_report"].exists()
     assert (outputs["figures"] / "sentiment_distribution_by_bank.png").exists()
 
 
@@ -86,3 +92,36 @@ def test_load_processed_reviews_accepts_review_column_alias(tmp_path):
     loaded = load_processed_reviews(input_path)
 
     assert "review_text" in loaded.columns
+
+
+def test_load_processed_reviews_handles_existing_review_text_and_review_alias(tmp_path):
+    input_path = tmp_path / "reviews.csv"
+    frame = sample_reviews()
+    frame["review"] = frame["review_text"]
+    frame.to_csv(input_path, index=False)
+
+    loaded = load_processed_reviews(input_path)
+
+    assert loaded["review_text"].to_list() == frame["review_text"].to_list()
+
+
+def test_build_bank_recommendation_summary_uses_observed_themes_and_sentiment():
+    summary = build_bank_recommendation_summary(sample_reviews(), top_n=3)
+
+    cbe = summary[summary["bank"].eq("CBE")].iloc[0]
+
+    assert cbe["review_count"] == 2
+    assert cbe["average_rating"] == 3.0
+    assert cbe["positive_count"] == 1
+    assert cbe["negative_count"] == 1
+    assert "transfer_speed" in cbe["satisfaction_drivers"]
+    assert "login_issues" in cbe["pain_points"]
+    assert "login" in cbe["top_complaint_keywords"]
+
+
+def test_load_analysis_dataset_fails_helpfully_without_csv_or_database_url(tmp_path, monkeypatch):
+    missing_input = tmp_path / "missing.csv"
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    with pytest.raises(RuntimeError, match="DATABASE_URL is not set"):
+        load_analysis_dataset(missing_input)

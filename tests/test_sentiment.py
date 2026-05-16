@@ -36,13 +36,14 @@ def test_add_sentiment_columns_outputs_required_schema():
 
     scored = add_sentiment_columns(frame, FakeClassifier())
 
-    assert scored.columns.to_list() == [
+    assert scored.columns.to_list()[:5] == [
         "review_id",
         "review_text",
         "sentiment_label",
         "sentiment_score",
         "identified_theme",
     ]
+    assert "bank" in scored.columns
     assert scored["review_id"].to_list() == [1, 2]
     assert scored["sentiment_label"].to_list() == ["positive", "negative"]
 

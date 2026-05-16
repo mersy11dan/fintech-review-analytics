@@ -177,9 +177,11 @@ def add_sentiment_columns(
     output["sentiment_score"] = predictions.map(lambda item: item[1])
     output["identified_theme"] = review_text.map(identify_theme)
 
-    return output[
-        ["review_id", "review_text", "sentiment_label", "sentiment_score", "identified_theme"]
-    ]
+    # Keep source metadata such as bank, rating, date, and source for downstream
+    # analysis and PostgreSQL loading.
+    front_columns = ["review_id", "review_text", "sentiment_label", "sentiment_score", "identified_theme"]
+    remaining_columns = [column for column in output.columns if column not in front_columns]
+    return output[front_columns + remaining_columns]
 
 
 def run_sentiment_pipeline(
