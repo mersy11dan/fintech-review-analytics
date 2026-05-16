@@ -10,9 +10,11 @@ requests
 scikit-learn
 seaborn
 sqlalchemy
+streamlit
 torch
 transformers
 vaderSentiment
 wordcloud
 textblob
+plotly
 pytest
