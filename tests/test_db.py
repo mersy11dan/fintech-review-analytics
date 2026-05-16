@@ -3,6 +3,7 @@
 import pandas as pd
 import pytest
 
+from src import db
 from src.db import normalize_review_frame, validate_review_frame
 
 
@@ -71,3 +72,12 @@ def test_validate_review_frame_accepts_valid_rows():
     )
 
     validate_review_frame(frame)
+
+
+def test_integrity_check_helpers_are_available():
+    assert callable(db.count_reviews_per_bank)
+    assert callable(db.average_rating_per_bank)
+    assert callable(db.important_null_counts)
+    assert callable(db.orphan_review_rows)
+    assert callable(db.duplicate_review_keys)
+    assert callable(db.run_integrity_checks)

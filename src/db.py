@@ -206,3 +206,123 @@ def load_reviews_to_postgres(frame: pd.DataFrame, env_var: str = "DATABASE_URL")
         "reviews_inserted": inserted_reviews,
         "reviews_skipped": len(normalized) - inserted_reviews,
     }
+
+
+def count_reviews_per_bank(connection) -> pd.DataFrame:
+    """Return review counts grouped by bank."""
+    return pd.read_sql(
+        text(
+            """
+            SELECT
+                b.bank_name,
+                COUNT(r.review_id) AS review_count
+            FROM banks AS b
+            LEFT JOIN reviews AS r
+                ON b.bank_id = r.bank_id
+            GROUP BY b.bank_id, b.bank_name
+            ORDER BY review_count DESC, b.bank_name
+            """
+        ),
+        connection,
+    )
+
+
+def average_rating_per_bank(connection) -> pd.DataFrame:
+    """Return average rating and review count grouped by bank."""
+    return pd.read_sql(
+        text(
+            """
+            SELECT
+                b.bank_name,
+                ROUND(AVG(r.rating)::numeric, 2) AS average_rating,
+                COUNT(r.review_id) AS review_count
+            FROM banks AS b
+            LEFT JOIN reviews AS r
+                ON b.bank_id = r.bank_id
+            GROUP BY b.bank_id, b.bank_name
+            ORDER BY average_rating DESC NULLS LAST, b.bank_name
+            """
+        ),
+        connection,
+    )
+
+
+def important_null_counts(connection) -> pd.DataFrame:
+    """Return null/blank counts for important review columns."""
+    return pd.read_sql(
+        text(
+            """
+            SELECT
+                SUM(CASE WHEN r.review_id IS NULL THEN 1 ELSE 0 END) AS null_review_id,
+                SUM(CASE WHEN r.bank_id IS NULL THEN 1 ELSE 0 END) AS null_bank_id,
+                SUM(
+                    CASE
+                        WHEN r.review_text IS NULL OR BTRIM(r.review_text) = '' THEN 1
+                        ELSE 0
+                    END
+                ) AS null_or_blank_review_text,
+                SUM(CASE WHEN r.rating IS NULL THEN 1 ELSE 0 END) AS null_rating,
+                SUM(CASE WHEN r.review_date IS NULL THEN 1 ELSE 0 END) AS null_review_date,
+                SUM(
+                    CASE
+                        WHEN r.source IS NULL OR BTRIM(r.source) = '' THEN 1
+                        ELSE 0
+                    END
+                ) AS null_or_blank_source
+            FROM reviews AS r
+            """
+        ),
+        connection,
+    )
+
+
+def orphan_review_rows(connection) -> pd.DataFrame:
+    """Return reviews whose bank_id does not exist in banks."""
+    return pd.read_sql(
+        text(
+            """
+            SELECT
+                r.review_id,
+                r.bank_id
+            FROM reviews AS r
+            LEFT JOIN banks AS b
+                ON r.bank_id = b.bank_id
+            WHERE b.bank_id IS NULL
+            """
+        ),
+        connection,
+    )
+
+
+def duplicate_review_keys(connection) -> pd.DataFrame:
+    """Return duplicate review business keys, which should be prevented by the schema."""
+    return pd.read_sql(
+        text(
+            """
+            SELECT
+                bank_id,
+                review_text,
+                rating,
+                review_date,
+                source,
+                COUNT(*) AS duplicate_count
+            FROM reviews
+            GROUP BY bank_id, review_text, rating, review_date, source
+            HAVING COUNT(*) > 1
+            """
+        ),
+        connection,
+    )
+
+
+def run_integrity_checks(env_var: str = "DATABASE_URL") -> dict[str, pd.DataFrame]:
+    """Run all database integrity checks and return named result tables."""
+    engine = create_engine_from_env(env_var)
+    with engine.begin() as connection:
+        return {
+            "reviews_per_bank": count_reviews_per_bank(connection),
+            "average_rating_per_bank": average_rating_per_bank(connection),
+            "null_counts": important_null_counts(connection),
+            "orphan_reviews": orphan_review_rows(connection),
+            "duplicate_review_keys": duplicate_review_keys(connection),
+        }
