@@ -65,6 +65,138 @@ def load_csv(path: Path) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
+def _numeric_value(text: str) -> float:
+    """Extract the first numeric value from report text."""
+    match = re.search(r"[-+]?\d*\.?\d+", text.replace(",", ""))
+    return float(match.group()) if match else 0.0
+
+
+def normalize_recommendations(recommendations: pd.DataFrame) -> pd.DataFrame:
+    """Normalize bank summary numeric fields and add Dashen when missing."""
+    if recommendations.empty:
+        return recommendations
+
+    recommendations = recommendations.copy()
+    numeric_columns = [
+        "review_count",
+        "average_rating",
+        "positive_count",
+        "neutral_count",
+        "negative_count",
+        "positive_share",
+        "negative_share",
+        "average_sentiment_score",
+    ]
+    for column in numeric_columns:
+        if column in recommendations.columns:
+            recommendations[column] = pd.to_numeric(recommendations[column], errors="coerce").fillna(0)
+
+    return add_missing_banks(recommendations)
+
+
+def load_recommendations_from_markdown() -> pd.DataFrame:
+    """Load bank KPI outputs from the committed Markdown summary for deployment."""
+    path = REPORTS_DIR / "bank_recommendation_inputs.md"
+    if not path.exists():
+        return pd.DataFrame()
+
+    rows: list[dict[str, object]] = []
+    current: dict[str, object] | None = None
+
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if line.startswith("## "):
+            if current:
+                rows.append(current)
+            current = {"bank": line.removeprefix("## ").strip()}
+            continue
+        if not current or not line.startswith("- "):
+            continue
+
+        label, _, value = line[2:].partition(":")
+        key = label.strip().lower()
+        value = value.strip()
+
+        if key == "review count":
+            current["review_count"] = int(_numeric_value(value))
+        elif key == "average rating":
+            current["average_rating"] = _numeric_value(value)
+        elif key == "sentiment mix":
+            sentiment_match = re.search(
+                r"(\d+)\s+positive,\s+(\d+)\s+neutral,\s+(\d+)\s+negative",
+                value,
+                flags=re.IGNORECASE,
+            )
+            if sentiment_match:
+                current["positive_count"] = int(sentiment_match.group(1))
+                current["neutral_count"] = int(sentiment_match.group(2))
+                current["negative_count"] = int(sentiment_match.group(3))
+        elif key == "average sentiment score":
+            current["average_sentiment_score"] = _numeric_value(value)
+        elif key == "top themes":
+            current["top_themes"] = value
+        elif key == "top complaint keywords":
+            current["top_complaint_keywords"] = value
+        elif key == "likely satisfaction drivers":
+            current["satisfaction_drivers"] = value
+        elif key == "likely pain points":
+            current["pain_points"] = value
+
+    if current:
+        rows.append(current)
+
+    recommendations = pd.DataFrame(rows)
+    if recommendations.empty:
+        return recommendations
+
+    total_sentiment = (
+        recommendations.get("positive_count", 0)
+        + recommendations.get("neutral_count", 0)
+        + recommendations.get("negative_count", 0)
+    )
+    recommendations["positive_share"] = recommendations.get("positive_count", 0).div(
+        total_sentiment.replace(0, pd.NA)
+    )
+    recommendations["negative_share"] = recommendations.get("negative_count", 0).div(
+        total_sentiment.replace(0, pd.NA)
+    )
+
+    return normalize_recommendations(recommendations)
+
+
+def load_themes_from_markdown() -> pd.DataFrame:
+    """Load top theme counts from the committed Markdown analysis summary."""
+    path = REPORTS_DIR / "analysis_summary.md"
+    if not path.exists():
+        return pd.DataFrame()
+
+    rows: list[dict[str, object]] = []
+    in_theme_table = False
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if line == "## Top Themes per Bank":
+            in_theme_table = True
+            continue
+        if in_theme_table and line.startswith("## "):
+            break
+        if not in_theme_table or not line.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if len(cells) != 3:
+            continue
+        if cells[0].lower() == "bank" or cells[0].startswith("---"):
+            continue
+        rows.append(
+            {
+                "bank": cells[0],
+                "identified_theme": cells[1],
+                "review_count": int(_numeric_value(cells[2])),
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
 @st.cache_data(show_spinner=False)
 def load_reviews() -> pd.DataFrame:
     """Load review-level processed data used for interactive exploration."""
@@ -106,24 +238,9 @@ def load_recommendations() -> pd.DataFrame:
     """Load bank-level recommendation and KPI summary outputs."""
     recommendations = load_csv(REPORTS_DIR / "bank_recommendation_inputs.csv")
     if recommendations.empty:
-        return recommendations
+        recommendations = load_recommendations_from_markdown()
 
-    recommendations = recommendations.copy()
-    numeric_columns = [
-        "review_count",
-        "average_rating",
-        "positive_count",
-        "neutral_count",
-        "negative_count",
-        "positive_share",
-        "negative_share",
-        "average_sentiment_score",
-    ]
-    for column in numeric_columns:
-        if column in recommendations.columns:
-            recommendations[column] = pd.to_numeric(recommendations[column], errors="coerce")
-
-    return add_missing_banks(recommendations)
+    return normalize_recommendations(recommendations)
 
 
 @st.cache_data(show_spinner=False)
@@ -131,7 +248,9 @@ def load_theme_summary() -> pd.DataFrame:
     """Load theme counts generated by the analysis pipeline."""
     themes = load_csv(REPORTS_DIR / "top_themes_per_bank.csv")
     if themes.empty:
-        return themes
+        themes = load_themes_from_markdown()
+    if themes.empty:
+        return pd.DataFrame(columns=["bank", "identified_theme", "review_count"])
     themes = themes.copy()
     themes["review_count"] = pd.to_numeric(themes["review_count"], errors="coerce").fillna(0)
     return themes
